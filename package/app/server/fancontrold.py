@@ -114,6 +114,11 @@ class Controller:
         self.original = {}      # channel -> (enable, duty) before we touched it
         self.mode_at = {}       # channel -> when manual mode was last asserted
         self.probe_results = {} # channel -> latest calibration result
+        self.probing = False        # a background calibration is running
+        self.probe_started = 0.0    # when the current/last probe began
+        self.probe_finished_at = 0.0
+        self.probe_error = None
+        self._probe_thread = None
         self.hardware_changes = []  # what changed since the last calibration
         # keyed by source key: "cpu", "hdd", one "gpu:<id>" per GPU and one
         # "aux:<chip>:<tempN>" per extra sensor
@@ -825,6 +830,55 @@ class Controller:
         finally:
             self.paused.clear()
 
+    def start_probe(self, settle=None):
+        """Kick off :meth:`probe` on a background thread and return at once.
+
+        A full calibration spends 30-40s in the hardware.  Any reverse proxy
+        in front of DSM (Lucky, iKuai port-forward, the DSM reverse proxy)
+        tends to cut an idle connection after ~30s, which surfaced as a 504
+        even though the probe itself finished fine.  Running it in the
+        background keeps every HTTP call short: the UI polls
+        :meth:`probe_status` until ``probing`` flips back to false.
+        """
+        with self.lock:
+            if self.probing:
+                return False
+            self.probing = True
+            self.probe_started = time.time()
+            self.probe_finished_at = 0.0
+            self.probe_error = None
+
+        def run():
+            error = None
+            try:
+                self.probe(settle)
+            except Exception as exc:  # noqa: BLE001 - surface any failure to the UI
+                error = str(exc) or exc.__class__.__name__
+                self.log("probe failed: %s" % error)
+            finally:
+                with self.lock:
+                    self.probing = False
+                    self.probe_error = error
+                    self.probe_finished_at = time.time()
+
+        thread = threading.Thread(target=run, name="probe", daemon=True)
+        self._probe_thread = thread
+        thread.start()
+        return True
+
+    def probe_status(self):
+        """Current state of the background calibration, for UI polling."""
+        with self.lock:
+            results = [dict(item) for item in self.probe_results.values()]
+            results.sort(key=lambda item: item.get("channel") or 0)
+            return {
+                "probing": self.probing,
+                "started": self.probe_started,
+                "finished": self.probe_finished_at,
+                "error": self.probe_error,
+                "results": results,
+            }
+
     def _store_probe(self, results):
         """Write the latest probe results into the configuration."""
         with self.lock:
@@ -1488,6 +1542,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if self._reject(denied):
                 return
             self._serve_diagnostic()
+        elif path == "/api/probe/status":
+            self._json(dict({"ok": True}, **controller.probe_status()))
         elif path == "/api/ping":
             self._json({"ok": True, "app": APP_NAME, "version": VERSION})
         elif path.startswith("/api/"):
@@ -1540,9 +1596,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except (TypeError, ValueError):
                 settle = 3.5
             settle = max(1.0, min(15.0, settle))
-            results = controller.probe(settle)
-            self._json({"ok": True, "results": results,
-                        "hardware": controller.hardware_info()})
+            started = controller.start_probe(settle)
+            # The calibration runs in the background; poll /api/probe/status
+            # for the result so no proxy timeout can 504 the request.
+            self._json({"ok": True, "probing": True,
+                        "already_running": not started})
         elif path == "/api/setup":
             selected = (payload or {}).get("channels")
             if not isinstance(selected, list):

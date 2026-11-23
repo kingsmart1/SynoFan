@@ -14,7 +14,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP="$HERE/package/app"
 VERSION="2.2.5"
-RELEASE="2"
+RELEASE="3"
 PKG="synofan"
 ARCH="x86_64"
 BASE_URL="/webman/3rdparty/synofan"

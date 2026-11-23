@@ -1522,6 +1522,17 @@ def list_temp_inventory():
                 continue
             ident = "%s:%s" % (instance, base)
             label = (read_text(os.path.join(path, base + "_label")) or "").strip()
+            if chip in DISK_DRIVERS:
+                # drivetemp/nvme expose their input only as "temp1", and a NAS
+                # has one node per bay, so the discovery screen otherwise shows
+                # a wall of anonymous "temp1" rows.  Name the disk (bay) it
+                # belongs to instead: "硬盘 sata3（型号 SN）".
+                blk_name = _block_name_for_hwmon(path)
+                if blk_name:
+                    disk_desc = _disk_identity(blk_name)
+                    label = ("硬盘 %s（%s）" % (blk_name, disk_desc)
+                             if disk_desc and disk_desc != blk_name
+                             else "硬盘 %s" % blk_name)
             raw = read_int(input_path)
             value = None if raw is None or raw <= 0 else raw / 1000.0
             reason = None

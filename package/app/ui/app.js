@@ -1294,14 +1294,26 @@ function renderSetup() {
 }
 
 async function probeOnce() {
-  const res = await api('probe', {
+  // The calibration runs in the background on the daemon (a six-header pass
+  // spends 30-40s in the hardware, longer than a reverse proxy keeps an idle
+  // connection alive), so start it and poll /api/probe/status for the result.
+  await api('probe', {
     method: 'POST',
     body: JSON.stringify({ settle: 4 })
   });
-  setupState.results = res.results || [];
-  hardware = res.hardware || hardware;
+  const deadline = Date.now() + 180000;
+  let state = null;
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    state = await api('probe/status');
+    if (state.error) throw new Error('标定失败：' + state.error);
+    if (!state.probing) break;
+    if (Date.now() > deadline) throw new Error('标定超时，请重试');
+  }
+  setupState.results = state.results || [];
   // A probe can change what counts as controllable (a channel that answered
   // PWM is a controller we *can* drive), so the banner is re-evaluated too.
+  hardware = await api('hardware');
   await loadDiagnostics();
   if (setupState.selected === null) setupState.selected = new Set();
   setupState.results.forEach((r) => {
