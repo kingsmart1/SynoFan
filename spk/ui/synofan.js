@@ -21,6 +21,7 @@ Ext.define("SynoFan.AppWindow", {
         var iframeHtml = '<iframe src="/webman/3rdparty/synofan/index.html" ' +
             'style="width:100%;height:100%;border:none;background:transparent;"></iframe>';
         return Ext.apply({
+            title: "SynoFan",
             width: 1180,
             height: 760,
             minWidth: 960,

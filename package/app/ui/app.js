@@ -16,7 +16,7 @@ const SVGNS = 'http://www.w3.org/2000/svg';
 
 const MODE_LABELS = { curve: '温度曲线', manual: '固定转速', auto: 'BIOS 自动' };
 const CURVE = { X0: 38, X1: 332, Y0: 12, Y1: 156, TMIN: 20, TMAX: 100, W: 340, H: 190 };
-const PROJECT_URL = 'https://github.com/LiuFudi/NiuFan';
+const PROJECT_URL = 'https://github.com/kingsmart1/SynoFan';
 const QQ_GROUP = '818299505';
 
 // Mirrors fanconfig.py so a newly added channel draws a usable curve before the
@@ -624,7 +624,7 @@ function updateLive() {
     const others = status.unsupported || [];
     if (status.third_party_ignored) {
       showAlert('检测到第三方软件驱动控制器 ' + status.third_party_ignored +
-        '，当前是「飞牛驱动」模式，已按设置忽略。请点右上角「硬件检测」，' +
+        '，当前是「内核驱动」模式，已按设置忽略。请点右上角「硬件检测」，' +
         '切换到「软件驱动」后重新检测。', true);
     } else if (others.length) {
       showAlert('没有找到带 PWM 控制的风扇控制器，但检测到其它控制器：' +
@@ -819,7 +819,7 @@ let setupState = {
 let lastSourceKeys = null;
 
 function driverPreferenceLabel(value) {
-  if (value === 'fnos') return '飞牛驱动';
+  if (value === 'fnos') return '内核驱动';
   if (value === 'software') return '软件驱动';
   return '自动';
 }
@@ -834,7 +834,7 @@ function driverPickerHtml(driverMode) {
     '<div class="driver-picker">' +
       '<button class="btn ghost driver-choice' +
         (active === 'fnos' ? ' on' : '') + '" data-driver-mode="fnos"' +
-        disabled + '>飞牛驱动</button>' +
+        disabled + '>内核驱动</button>' +
       '<button class="btn ghost driver-choice' +
         (active === 'software' ? ' on' : '') + '" data-driver-mode="software"' +
         disabled + '>软件驱动</button>' +
@@ -918,7 +918,7 @@ function setSetupFailure(kind, detail) {
     setupState.failure = {
       kind: kind,
       title: setupState.autoSwitchedFromFnos
-        ? '飞牛驱动标定无效，已尝试切换到软件驱动，但仍无法完成有效标定。'
+        ? '内核驱动标定无效，已尝试切换到软件驱动，但仍无法完成有效标定。'
         : modeLabel + '仍无法完成有效标定。',
       detail: detail
     };
@@ -1397,7 +1397,7 @@ async function runProbe() {
       setupState.autoSwitchedFromFnos = true;
       if (note) {
         note.innerHTML = '<span class="spin"></span>' +
-          '飞牛驱动标定无效，正在切换到软件驱动并重新标定…';
+          '内核驱动标定无效，正在切换到软件驱动并重新标定…';
       }
       const switched = await switchDriverMode('software', true);
       if (switched) {

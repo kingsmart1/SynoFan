@@ -149,7 +149,8 @@ PROFILES = (
     ControllerProfile(
         key="it87",
         label="ITE IT87xx",
-        prefixes=("it87", "it8603", "it8613", "it8620", "it8623", "it8628",
+        prefixes=("it87", "it8603", "it8613", "it8620", "it8623", "it8625",
+                  "it8628",
                   "it8689",
                   "it8712", "it8716", "it8718", "it8720", "it8721", "it8726",
                   "it8728", "it8732", "it8758", "it8771", "it8772", "it8781",
@@ -535,6 +536,15 @@ def find_controller(preference="auto"):
             preference == "software" or _ACTIVE_CONTROLLER.controllable):
         return (_ACTIVE_CONTROLLER, _ACTIVE_CONTROLLER.identity.model,
                 _ACTIVE_CONTROLLER.profile)
+    # The raw Super-I/O probe found nothing it can drive -- usually because the
+    # kernel driver (it87/nct6775) already owns the chip and answers for the
+    # config port, or the port is locked down.  The hwmon node the kernel
+    # published is still perfectly drivable, so fall back to it.  Returning
+    # nothing here used to leave the user with a working hwmon controller, an
+    # empty channel list and fans frozen at their last duty cycle, while the
+    # UI claimed no fan controller had been found at all.
+    if path is not None and profile is not None:
+        return path, name, profile
     return None, None, None
 
 

@@ -5,7 +5,7 @@
 # This file is part of niufan, licensed under the GNU General Public
 # License version 3 or (at your option) any later version.
 # See the LICENSE file for the full text.
-"""Diagnostic hardware log export for NiuFan.
+"""Diagnostic hardware log export for SynoFan (the NiuFan DSM port).
 
 Collects what the application can see about the machine it runs on -- board,
 CPU, GPUs, fan controllers, current sensor readings, kernel modules -- and
@@ -236,7 +236,7 @@ def _app_info(ctx, out, errors):
     out.append(_section("1. 应用信息 / application"))
     out.append(_field("应用", "%s %s" % (ctx.get("app_name"),
                                          ctx.get("version"))))
-    out.append(_field("应用标题", ctx.get("app_title") or "NiuFan"))
+    out.append(_field("应用标题", ctx.get("app_title") or "SynoFan"))
     out.append(_field("导出时间", time.strftime("%Y-%m-%d %H:%M:%S %z")))
     out.append(_field("导出原因", ctx.get("note") or "用户从「硬件检测」页导出"))
     if hasattr(os, "getuid"):
@@ -815,7 +815,8 @@ def disk_summary(sensor):
 def build_report(ctx):
     """Return ``(text, errors)``.  Always a usable report, never an exception."""
     errors = []
-    out = ["NiuFan 诊断日志 / diagnostic report\n",
+    title = ctx.get("app_title") or "SynoFan"
+    out = ["%s 诊断日志 / diagnostic report\n" % title,
            "由「硬件检测」页的「导出诊断日志」生成，用于排查风扇控制器识别问题。\n",
            "只含硬件信息、运行日志与配置摘要；不含口令、密钥、用户文件、完整序列号。\n"]
     steps = (_app_info, _system_section, _board_section, _cpu_section,

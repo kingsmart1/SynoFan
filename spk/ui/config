@@ -2,7 +2,7 @@
     "synofan.js": {
         "SynoFan.Application": {
             "type": "app",
-            "title": "app:displayname",
+            "title": "SynoFan",
             "version": "1.0",
             "icon": "images/synofan-{0}.png",
             "allowMultiInstance": false,
@@ -14,7 +14,7 @@
         },
         "SynoFan.AppWindow": {
             "type": "lib",
-            "title": "app:displayname",
+            "title": "SynoFan",
             "icon": "images/synofan-{0}.png"
         }
     }

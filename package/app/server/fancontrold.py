@@ -44,11 +44,11 @@ import fanconfig  # noqa: E402
 import fandiag  # noqa: E402
 import fanhardware  # noqa: E402
 
-APP_NAME = "niufan"
-#: Name shown to the operator in log lines and --help.  Purely cosmetic: the
-#: identifier above stays ``niufan`` because it names the config directory, the
-#: gateway path and the value reported by /api/ping.
-APP_TITLE = "NiuFan"
+APP_NAME = "synofan"
+#: Name shown to the operator in log lines, --help, the diagnostic report and
+#: the DSM desktop.  The identifier above is the machine-readable one: it names
+#: the diagnostic archive prefix and the value reported by /api/ping.
+APP_TITLE = "SynoFan"
 #: What the app was called before 2.0.0.  Only used to pick up an existing
 #: configuration on the first start after the rename.
 LEGACY_APP_NAME = "fn-fancontrol"
@@ -224,7 +224,7 @@ class Controller:
                 self.driver_mode_label = "软件驱动"
             elif isinstance(path, str):
                 self.driver_mode = "fnos"
-                self.driver_mode_label = "飞牛驱动"
+                self.driver_mode_label = "内核驱动"
             else:
                 self.driver_mode = "unknown"
                 self.driver_mode_label = "未识别"
@@ -1040,7 +1040,7 @@ class Controller:
                 "driver_mode_label": self.driver_mode_label,
                 "driver_preference": self.driver_preference,
                 "driver_preference_label": {
-                    "fnos": "飞牛驱动",
+                    "fnos": "内核驱动",
                     "software": "软件驱动",
                     "auto": "自动",
                 }.get(self.driver_preference, "自动"),
@@ -1096,7 +1096,7 @@ class Controller:
             "driver_mode_label": self.driver_mode_label,
             "driver_preference": self.driver_preference,
             "driver_preference_label": {
-                "fnos": "飞牛驱动",
+                "fnos": "内核驱动",
                 "software": "软件驱动",
                 "auto": "自动",
             }.get(self.driver_preference, "自动"),
@@ -1164,7 +1164,7 @@ class Controller:
             third_party = fanhardware.third_party_controller()
             if third_party[0] is not None and self.driver_preference == "fnos":
                 warnings.append(
-                    "检测到第三方软件驱动控制器 %s，但当前是「飞牛驱动」模式，"
+                    "检测到第三方软件驱动控制器 %s，但当前是「内核驱动」模式，"
                     "按设置已忽略。请切换到「软件驱动」后重新检测。"
                     % third_party[1])
             elif active is not None and channel_count == 0:
@@ -1190,7 +1190,7 @@ class Controller:
             "driver_mode_label": self.driver_mode_label,
             "driver_preference": self.driver_preference,
             "driver_preference_label": {
-                "fnos": "飞牛驱动",
+                "fnos": "内核驱动",
                 "software": "软件驱动",
                 "auto": "自动",
             }.get(self.driver_preference, "自动"),
