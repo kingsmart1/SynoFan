@@ -1,0 +1,93 @@
+#!/bin/sh
+# SynoFan: post-install
+PATH=/usr/sbin:/usr/bin:/sbin:/bin:/usr/syno/bin:$PATH
+export PATH
+
+PKG="${SYNOPKG_PKGNAME:-synofan}"
+DEST="${SYNOPKG_PKGDEST:-/var/packages/$PKG/target}"
+ETC="${SYNOPKG_PKG_ETC:-/var/packages/$PKG/etc}"
+VAR="${SYNOPKG_PKGVAR:-/var/packages/$PKG/var}"
+PY="/usr/bin/python3"
+LOG="${SYNOPKG_TEMP_LOGFILE:-$VAR/install.log}"
+SUPER="/usr/local/sbin/synofan-super"
+
+runroot() {
+    if [ -x "$SUPER" ]; then
+        sudo -n "$SUPER" "$@"
+    else
+        "$@"
+    fi
+}
+
+mkdir -p "$ETC" "$VAR"
+
+# make the fan controller / disk temperature sensors available (best effort)
+runroot modprobe it87 2>/dev/null || true
+runroot modprobe coretemp 2>/dev/null || true
+runroot modprobe drivetemp 2>/dev/null || true
+
+# SynoFan owns the fans: stop the RR loader's fancontrol supervisor (and the
+# lm-sensors daemon it spawned).  The RR addon only restarts them at boot, and
+# SynoFan's start runs later than that, so this sticks until a reboot without
+# the package.  Keep the previous curve as a reference.
+if [ -f /etc/fancontrol ] && [ ! -f "$ETC/fancontrol.backup" ]; then
+    cp -a /etc/fancontrol "$ETC/fancontrol.backup"
+fi
+runroot /usr/bin/systemctl stop sensors.service 2>/dev/null || true
+runroot /usr/bin/systemctl disable sensors.service 2>/dev/null || true
+runroot pkill -f '/usr/sbin/fancontrol' 2>/dev/null || true
+runroot pkill -f '/usr/bin/rr-sensors.sh' 2>/dev/null || true
+runroot rm -f /run/fancontrol.pid 2>/dev/null || true
+
+# default configuration based on the fans this machine actually exposes
+"$PY" "$DEST/server/fancontrold.py" init-config \
+    --appdest "$DEST" --etc "$ETC" --var "$VAR" >> "$LOG" 2>&1
+
+# start with a curve matching the previous fancontrol settings where possible
+"$PY" - "$ETC" <<'PYEOF' >> "$LOG" 2>&1
+import json, os, sys
+
+etc = sys.argv[1]
+cfg_path = os.path.join(etc, "config.json")
+backup = os.path.join(etc, "fancontrol.backup")
+if not (os.path.exists(cfg_path) and os.path.exists(backup)):
+    sys.exit(0)
+try:
+    cfg = json.load(open(cfg_path))
+except (OSError, ValueError):
+    sys.exit(0)
+
+vals = {}
+for line in open(backup):
+    line = line.split("#", 1)[0].strip()
+    if "=" not in line:
+        continue
+    key, _, value = line.partition("=")
+    key, value = key.strip(), value.strip()
+    if key in ("MINTEMP", "MAXTEMP") and value:
+        # fancontrol writes "MINTEMP=hwmon1/pwm1=30"; keep the trailing number
+        vals.setdefault(key, value.rsplit("=", 1)[-1].split()[0])
+
+try:
+    tmin, tmax = float(vals["MINTEMP"]), float(vals["MAXTEMP"])
+except KeyError:
+    sys.exit(0)
+if tmax <= tmin:
+    sys.exit(0)
+
+lo = 25  # fancontrol MINSTOP 63/255 ~= 25 %
+mid = round((lo + 100) / 2, 1)
+points = [[tmin, lo], [round((tmin + tmax) / 2, 1), mid], [tmax, 100], [min(120.0, tmax + 15), 100]]
+
+for fan in cfg.get("fans", []):
+    if fan.get("channel") == 1:
+        fan["points"] = points
+        with open(cfg_path, "w") as handle:
+            json.dump(cfg, handle, ensure_ascii=False, indent=2)
+        print("synofan: migrated fancontrol curve onto pwm1: %s" % points)
+        break
+PYEOF
+
+echo "SynoFan installed." >> "$LOG"
+echo "SynoFan: the initial login password (if any) will be created on first start at $ETC/initial_password" >> "$LOG"
+exit 0

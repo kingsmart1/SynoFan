@@ -1,0 +1,160 @@
+#!/bin/sh
+# SynoFan lifecycle: start / stop / status / log
+#
+# DSM 7 refuses root to unsigned third-party packages, so this script runs as
+# the package user (sc-synofan).  Every privileged operation goes through the
+# setuid-style helper /usr/local/sbin/synofan-super (installed once by
+# tools/synofan-super-setup.sh): writing /sys/class/hwmon/*/pwm*, stopping the
+# RR fancontrol supervisor, and dropping the nginx bridge for the web UI.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin:/usr/syno/bin:$PATH
+export PATH
+
+PKG="${SYNOPKG_PKGNAME:-synofan}"
+DEST="${SYNOPKG_PKGDEST:-/var/packages/$PKG/target}"
+ETC="${SYNOPKG_PKG_ETC:-/var/packages/$PKG/etc}"
+VAR="${SYNOPKG_PKGVAR:-/var/packages/$PKG/var}"
+PY="/usr/bin/python3"
+DAEMON="$DEST/server/fancontrold.py"
+SOCKET="$VAR/app.sock"
+PIDFILE="$VAR/app.pid"
+LOG="$VAR/info.log"
+NGINX_CONF="/usr/local/etc/nginx/conf.d/dsm.synofan.conf"
+PREFIX="/webman/3rdparty/synofan"
+SUPER="/usr/local/sbin/synofan-super"
+
+mkdir -p "$VAR"
+
+log() { echo "$(date '+%Y-%m-%d %H:%M:%S') - $*" >> "$LOG" 2>/dev/null; }
+
+# run a command as root via the helper (no-op fallback if helper missing)
+runroot() {
+    if [ -x "$SUPER" ]; then
+        sudo -n "$SUPER" "$@"
+    else
+        "$@"
+    fi
+}
+
+running_pid() {
+    [ -r "$PIDFILE" ] || return 1
+    local pid
+    pid="$(head -n 1 "$PIDFILE" 2>/dev/null | tr -d '[:space:]')"
+    [ -n "$pid" ] || return 1
+    if runroot kill -0 "$pid" 2>/dev/null; then
+        printf '%s' "$pid"
+        return 0
+    fi
+    rm -f "$PIDFILE"
+    return 1
+}
+
+ensure_nginx() {
+    [ -r "$DEST/nginx.conf" ] || return 0
+    if [ ! -f "$NGINX_CONF" ]; then
+        runroot cp -f "$DEST/nginx.conf" "$NGINX_CONF"
+        log "wrote nginx bridge"
+    fi
+    # nginx ships at /usr/bin/nginx on DSM (not /usr/syno/bin); reload every
+    # start so a freshly written or upgraded bridge always takes effect.
+    runroot sh -c '/usr/bin/nginx -t >/dev/null 2>&1 && /usr/bin/nginx -s reload >/dev/null 2>&1 || true'
+}
+
+stop_fancontrol() {
+    if [ -f /etc/fancontrol ] && [ ! -f "$ETC/fancontrol.backup" ]; then
+        mkdir -p "$ETC"
+        cp -a /etc/fancontrol "$ETC/fancontrol.backup" 2>/dev/null || true
+    fi
+    runroot /usr/bin/systemctl stop sensors.service 2>/dev/null || true
+    runroot /usr/bin/systemctl disable sensors.service 2>/dev/null || true
+    runroot pkill -f '/usr/sbin/fancontrol' 2>/dev/null || true
+    runroot pkill -f '/usr/bin/rr-sensors.sh' 2>/dev/null || true
+    runroot rm -f /run/fancontrol.pid 2>/dev/null || true
+    log "stopped fancontrol / rr-sensors supervisor"
+}
+
+restore_bios() {
+    if [ -r "$DAEMON" ] && [ -x "$PY" ]; then
+        runroot "$PY" "$DAEMON" restore --appdest "$DEST" --etc "$ETC" --var "$VAR" >> "$LOG" 2>&1 || true
+    fi
+}
+
+start_daemon() {
+    # launch the daemon as root and echo its pid back
+    runroot sh -c '
+        LOG="$1"; shift
+        nohup "$@" >> "$LOG" 2>&1 &
+        echo $!
+    ' sh "$LOG" "$PY" "$DAEMON" run \
+        --appdest "$DEST" --etc "$ETC" --var "$VAR" \
+        --ui "$DEST/ui" --socket "$SOCKET" \
+        --socket-group http --gateway-prefix "$PREFIX" --self-auth
+}
+
+start() {
+    ensure_nginx
+    stop_fancontrol
+
+    local pid
+    if pid="$(running_pid)" && [ -S "$SOCKET" ]; then
+        log "already running (pid $pid)"
+        return 0
+    fi
+    rm -f "$SOCKET" "$PIDFILE"
+    [ -r "$DAEMON" ] || { log "daemon not found"; exit 1; }
+    [ -x "$PY" ] || { log "python3 not found at $PY"; exit 1; }
+    [ -x "$SUPER" ] || { log "WARN: $SUPER missing - run tools/synofan-super-setup.sh"; }
+
+    log "starting SynoFan"
+    pid="$(start_daemon)"
+    echo "$pid" > "$PIDFILE"
+    log "pid = $pid"
+
+    local i=0
+    while [ "$i" -lt 15 ]; do
+        [ -S "$SOCKET" ] && break
+        runroot kill -0 "$pid" 2>/dev/null || { log "daemon exited during startup"; rm -f "$PIDFILE"; exit 1; }
+        sleep 1
+        i=$((i + 1))
+    done
+    [ -S "$SOCKET" ] && log "ready (socket $SOCKET)" || log "WARN: socket not up yet"
+    return 0
+}
+
+stop() {
+    local pid
+    if ! pid="$(running_pid)"; then
+        log "not running"
+        return 0
+    fi
+    log "stopping pid $pid"
+    runroot kill -TERM "$pid" 2>/dev/null
+    local i=0
+    while runroot kill -0 "$pid" 2>/dev/null && [ "$i" -lt 15 ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+    if runroot kill -0 "$pid" 2>/dev/null; then
+        log "forcing kill of pid $pid"
+        runroot kill -KILL "$pid" 2>/dev/null
+        restore_bios
+    fi
+    rm -f "$PIDFILE" "$SOCKET"
+    log "stopped"
+    return 0
+}
+
+status() {
+    local pid
+    pid="$(running_pid)" || exit 3
+    [ -S "$SOCKET" ] || exit 3
+    exit 0
+}
+
+case "${1:-}" in
+    start) start ;;
+    stop) stop ;;
+    status) status ;;
+    log) echo "$LOG" ;;
+    reload) ensure_nginx ;;
+    *) exit 1 ;;
+esac

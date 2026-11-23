@@ -1,0 +1,4 @@
+#!/bin/sh
+# SynoFan: post-upgrade.  The package manager restarts the service after this,
+# and start-stop-status re-asserts the nginx bridge on start.
+exit 0

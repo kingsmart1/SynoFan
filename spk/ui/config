@@ -1,0 +1,21 @@
+{
+    "synofan.js": {
+        "SynoFan.Application": {
+            "type": "app",
+            "title": "app:displayname",
+            "version": "1.0",
+            "icon": "images/synofan-{0}.png",
+            "allowMultiInstance": false,
+            "allUsers": false,
+            "appWindow": "SynoFan.AppWindow",
+            "depend": [
+                "SynoFan.AppWindow"
+            ]
+        },
+        "SynoFan.AppWindow": {
+            "type": "lib",
+            "title": "app:displayname",
+            "icon": "images/synofan-{0}.png"
+        }
+    }
+}

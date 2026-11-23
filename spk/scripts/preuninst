@@ -1,0 +1,3 @@
+#!/bin/sh
+# SynoFan: pre-uninstall
+exit 0

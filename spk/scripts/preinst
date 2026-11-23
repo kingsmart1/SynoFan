@@ -1,0 +1,10 @@
+#!/bin/sh
+# SynoFan: pre-install checks
+PATH=/usr/sbin:/usr/bin:/sbin:/bin:/usr/syno/bin:$PATH
+export PATH
+
+command -v /usr/bin/python3 >/dev/null 2>&1 || {
+    echo "SynoFan requires the system python3 (DSM 7 ships it)." >&2
+    exit 1
+}
+exit 0

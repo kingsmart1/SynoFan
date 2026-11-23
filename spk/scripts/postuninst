@@ -1,0 +1,24 @@
+#!/bin/sh
+# SynoFan: post-uninstall.  Hand every fan back to the BIOS and drop the
+# nginx bridge that pointed /webman/3rdparty/synofan/api/ at the daemon.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin:/usr/syno/bin:$PATH
+export PATH
+
+PKG="${SYNOPKG_PKGNAME:-synofan}"
+DEST="${SYNOPKG_PKGDEST:-/var/packages/$PKG/target}"
+ETC="${SYNOPKG_PKG_ETC:-/var/packages/$PKG/etc}"
+VAR="${SYNOPKG_PKGVAR:-/var/packages/$PKG/var}"
+
+# The daemon already restored the headers it drove on a clean stop; this is
+# the belt-and-braces sweep in case it was killed before it could.
+if [ -r "$DEST/server/fancontrold.py" ] && [ -x /usr/bin/python3 ]; then
+    /usr/bin/python3 "$DEST/server/fancontrold.py" restore \
+        --appdest "$DEST" --etc "$ETC" --var "$VAR" 2>/dev/null || true
+fi
+
+rm -f /usr/local/etc/nginx/conf.d/dsm.synofan.conf
+if command -v nginx >/dev/null 2>&1; then
+    nginx -t >/dev/null 2>&1 && nginx -s reload >/dev/null 2>&1 || true
+fi
+
+exit 0

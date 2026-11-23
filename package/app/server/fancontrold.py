@@ -30,6 +30,7 @@ import copy
 import http.server
 import json
 import os
+import shutil
 import signal
 import socketserver
 import sys
@@ -1278,6 +1279,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def authorise(self):
         """Return None when the request may proceed, else a rejection reason."""
+        guard = getattr(self.server, "auth_guard", None)
+        if guard is not None:
+            return guard(self)
+
         identity = self.gateway_identity()
 
         if identity["userid"] is None:
@@ -1315,6 +1320,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if str(identity["isadmin"]).strip().lower() in ("1", "true", "yes"):
             return None
         return "需要管理员权限"
+
+    def _reject(self, denied):
+        """Turn a rejection from :meth:`authorise` into an HTTP error response.
+
+        ``None`` means proceed; a plain string becomes a 403; a
+        ``(status, message)`` pair covers other failures such as 401.
+        """
+        if denied is None:
+            return False
+        if isinstance(denied, tuple):
+            self._error(denied[0], denied[1])
+        else:
+            self._error(403, denied)
+        return True
+
+    def _handle_auth(self):
+        """Serve the self-auth endpoints when the guard is installed.
+
+        Returns True when the request was handled here, so the caller skips
+        the normal authorisation and dispatch.
+        """
+        guard = getattr(self.server, "auth_guard", None)
+        if guard is None:
+            return False
+        path = self._relative()
+        if not path.startswith("/api/auth/"):
+            return False
+        return guard.route(self, path)
 
     # -- static files ------------------------------------------------------ #
 
@@ -1432,9 +1465,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # -- routes ------------------------------------------------------------ #
 
     def do_GET(self):
+        if self._handle_auth():
+            return
         denied = self.authorise()
-        if denied:
-            self._error(403, denied)
+        if self._reject(denied):
             return
         path = self._relative()
         controller = self.server.controller
@@ -1446,14 +1480,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(controller.hardware_info())
         elif path == "/api/diagnostics/status":
             denied = self.authorise_diagnostics()
-            if denied:
-                self._error(403, denied)
+            if self._reject(denied):
                 return
             self._json(controller.diagnostics_status(self.server.diagnostics))
         elif path == "/api/diagnostics/download":
             denied = self.authorise_diagnostics()
-            if denied:
-                self._error(403, denied)
+            if self._reject(denied):
                 return
             self._serve_diagnostic()
         elif path == "/api/ping":
@@ -1466,9 +1498,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
     do_HEAD = do_GET
 
     def do_POST(self):
+        if self._handle_auth():
+            return
         denied = self.authorise()
-        if denied:
-            self._error(403, denied)
+        if self._reject(denied):
             return
         path = self._relative()
         controller = self.server.controller
@@ -1479,8 +1512,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # is a malformed request rather than "no options".
         if path == "/api/diagnostics/export":
             denied = self.authorise_diagnostics()
-            if denied:
-                self._error(403, denied)
+            if self._reject(denied):
                 return
             self._export_diagnostic()
             return
@@ -1687,6 +1719,16 @@ def cmd_run(args, log, paths):
         # root) needs to reach this socket.  Keeping it root-only stops any
         # local account from bypassing the gateway and driving the fans.
         os.chmod(socket_path, 0o600)
+        # On the Synology build the socket is shared with the ``http`` group
+        # so the system nginx can reach it; every request then has to pass the
+        # self-auth guard, which is why this only happens when requested.
+        if getattr(args, "socket_group", None):
+            try:
+                os.chmod(socket_path, 0o660)
+                shutil.chown(socket_path, group=args.socket_group)
+            except OSError as exc:
+                log("WARNING: could not grant socket to group %s: %s"
+                    % (args.socket_group, exc))
         endpoint = "unix:%s" % socket_path
         base_path = gateway_prefix.rstrip("/") + "/"
 
@@ -1697,6 +1739,9 @@ def cmd_run(args, log, paths):
     server.gateway_prefix = gateway_prefix
     server.base_path = base_path
     server.require_admin = getattr(args, "require_admin", True)
+    if getattr(args, "self_auth", False):
+        import synoauth  # noqa: F401 - only shipped in the Synology build
+        server.auth_guard = synoauth.AuthGuard(paths["etc"], log)
     server.timeout = 1
 
     stopping = threading.Event()
@@ -1760,6 +1805,17 @@ def build_parser():
             ),
             ("--host", {"help": "serve on TCP instead of a Unix socket (testing)"}),
             ("--port", {"type": int, "default": 8099}),
+            (
+                "--self-auth",
+                {
+                    "action": "store_true",
+                    "help": "require the built-in password login (Synology build)",
+                },
+            ),
+            (
+                "--socket-group",
+                {"help": "group granted access to the Unix socket (e.g. http)"},
+            ),
             (
                 "--require-admin",
                 {

@@ -11,6 +11,9 @@ package/*.fpk
 /*.zip
 /dist/
 
+# Synology SPK staging directory (build-spk.sh)
+/.build/
+
 # Editor / OS noise
 .DS_Store
 Thumbs.db
